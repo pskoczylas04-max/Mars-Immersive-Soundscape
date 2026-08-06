@@ -63,6 +63,7 @@ def main():
 
     frame_idx = 0
     seen_ids = set()  # debug: every track id ever created
+    max_people = 0    # debug: peak simultaneous people
 
     cap = cv2.VideoCapture(0)
 
@@ -112,10 +113,17 @@ def main():
 
         people_count = len(tracks)
 
-        # debug: count id churn (1 person walking should stay ~1 unique id)
+        # debug: multi-person reliability. with a fixed group in frame, total ids
+        # should equal peak people; extra ids = churn (re-registrations / swaps)
         seen_ids.update(tracks.keys())
+        max_people = max(max_people, people_count)
         if frame_idx % 30 == 0:
-            print(f"fps {fps:.1f}  people {people_count}  unique ids {len(seen_ids)}")
+            churn = len(seen_ids) - max_people
+            active = sorted(tracks.keys())
+            print(
+                f"fps {fps:.1f}  people {people_count}  peak {max_people}  "
+                f"total ids {len(seen_ids)}  churn {churn}  active {active}"
+            )
 
         # Add to history and check if count is stable
         people_count_history.append(people_count)
