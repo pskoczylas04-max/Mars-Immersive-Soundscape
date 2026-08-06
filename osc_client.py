@@ -27,3 +27,6 @@ class OSCClient:
 
     def send_group_std(self, std: float):
         self.client.send_message("/group/std", float(std) if std is not None else [])
+
+    def send_gesture(self, name: str):
+        self.client.send_message("/gesture/" + name, 1)

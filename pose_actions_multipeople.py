@@ -17,6 +17,7 @@ from helpers import (
     energy_to_level,
     compute_energy,
     compute_group_stats,
+    is_robot_arms,
     average_to_level,
     max_energy_converter,
 )
@@ -61,6 +62,7 @@ def main():
     last_sent_avg = None
     last_sent_max = None
     last_sent_std_time = 0.0
+    gesture_active = False  # true while someone holds the robot arms pose
 
     frame_idx = 0
     seen_ids = set()  # debug: every track id ever created
@@ -142,6 +144,7 @@ def main():
                 prev_people_count = stable_count
 
         # Per-person pose + energy
+        gesture_now = False  # set true if anyone is in the robot arms pose
         for tid, t in tracks.items():
             x1, y1, x2, y2 = expand_box(*t["bbox"], W, H)
             crop = frame[y1:y2, x1:x2]
@@ -158,6 +161,9 @@ def main():
                 continue
 
             lm = result.pose_landmarks[0]
+
+            if is_robot_arms(lm):
+                gesture_now = True
 
             def p(i):
                 return (lm[i].x, lm[i].y)
@@ -196,6 +202,12 @@ def main():
                 (0, 255, 0),
                 2,
             )
+
+        # fire the rover arm trigger once when the pose starts
+        if gesture_now and not gesture_active:
+            osc.send_gesture("roverarm")
+            print("robot arms -> rover arm trigger")
+        gesture_active = gesture_now
 
         # Compute group stats (numeric floats 0..1)
         numeric_vals = [v["value"] for v in person_energy_state.values()]

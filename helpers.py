@@ -108,3 +108,27 @@ def max_energy_converter(max_value):
     if max_value is None:
         return None
     return energy_to_level(max_value)  # Change this to perform something random maybe
+
+
+def is_robot_arms(lm, vis=0.5):
+    """True if the person is in the robot arms pose. Both elbows out at about
+    shoulder height, both forearms vertical, one forearm up and one down.
+    lm is the mediapipe pose landmark list. Uses shoulders, elbows, wrists.
+    """
+    needed = [11, 12, 13, 14, 15, 16]
+    if any(lm[i].visibility < vis for i in needed):
+        return False
+
+    def arm_ok(shoulder, elbow, wrist):
+        upper_horizontal = abs(elbow.x - shoulder.x) > abs(elbow.y - shoulder.y)
+        forearm_vertical = abs(wrist.y - elbow.y) > abs(wrist.x - elbow.x)
+        return upper_horizontal and forearm_vertical
+
+    left_ok = arm_ok(lm[11], lm[13], lm[15])
+    right_ok = arm_ok(lm[12], lm[14], lm[16])
+    if not (left_ok and right_ok):
+        return False
+
+    left_up = lm[15].y < lm[13].y
+    right_up = lm[16].y < lm[14].y
+    return left_up != right_up
