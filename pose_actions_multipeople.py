@@ -1,3 +1,4 @@
+import sys
 import time
 from collections import deque
 
@@ -65,7 +66,9 @@ def main():
     seen_ids = set()  # debug: every track id ever created
     max_people = 0    # debug: peak simultaneous people
 
-    cap = cv2.VideoCapture(0)
+    # optional video file path as an argument, else webcam
+    source = sys.argv[1] if len(sys.argv) > 1 else 0
+    cap = cv2.VideoCapture(source)
 
     fps = 30
     t_prev = time.time()
