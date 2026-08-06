@@ -19,7 +19,6 @@ from helpers import (
     average_to_level,
     max_energy_converter,
 )
-from tracker import TrackManager
 
 
 # ------------------ OSC ------------------
@@ -27,21 +26,15 @@ from tracker import TrackManager
 OSC_IP = "127.0.0.1"
 OSC_PORT = 8000
 
-
-def run_detector(frame, detector):
-    """Run YOLO detector on frame and return person bounding boxes (xyxy)."""
-    det = detector(frame, verbose=False)[0]
-    detections = []
-    for box, cls in zip(det.boxes.xyxy.cpu().numpy(), det.boxes.cls.cpu().numpy()):
-        if int(cls) == 0:
-            detections.append(box)
-    return detections
+# ------------------ Detection ------------------
+CONF = 0.4       # min YOLO confidence; higher = fewer false detections
+DEVICE = "mps"   # run YOLO on the Mac GPU (Metal) instead of CPU
 
 
 def main():
     osc = OSCClient(OSC_IP, OSC_PORT)
 
-    detector = YOLO("yolov8n.pt")
+    detector = YOLO("yolo11n.pt")
 
     base_options = python.BaseOptions(model_asset_path="pose_landmarker_lite.task")
     options = vision.PoseLandmarkerOptions(
@@ -50,9 +43,11 @@ def main():
     )
     pose = vision.PoseLandmarker.create_from_options(options)
 
-    MAX_MISSES = 15
+    MAX_MISSES = 15   # frames to keep an id's history after it disappears
+    HIST_LEN = 20     # keypoint frames kept per person for the energy calc
 
-    tracker = TrackManager(MAX_MISSES)
+    track_hist = {}   # tid -> deque of recent keypoint dicts (per person)
+    last_seen = {}    # tid -> last frame index this id was returned
     prev_people_count = -1
     # person_energy_state maps tid -> { "level": str, "value": float }
     person_energy_state = {}
@@ -67,6 +62,7 @@ def main():
     last_sent_std_time = 0.0
 
     frame_idx = 0
+    seen_ids = set()  # debug: every track id ever created
 
     cap = cv2.VideoCapture(0)
 
@@ -86,18 +82,40 @@ def main():
         t_prev = t_now
         fps = 0.9 * fps + 0.1 * (1.0 / max(dt, 1e-6))
 
-        detections = run_detector(frame, detector)
+        # detect + track in ONE call: YOLO finds people, ByteTrack keeps their ids
+        results = detector.track(
+            frame,
+            persist=True,
+            conf=CONF,
+            classes=[0],
+            device=DEVICE,
+            tracker="bytetrack.yaml",
+            verbose=False,
+        )[0]
 
-        tracker.update(detections, frame_idx)
+        # rebuild the {tid: {bbox, hist}} shape the rest of the loop expects
+        tracks = {}
+        boxes = results.boxes
+        if boxes is not None and boxes.id is not None:
+            for box, tid in zip(boxes.xyxy.cpu().numpy(), boxes.id.int().cpu().numpy()):
+                tid = int(tid)
+                if tid not in track_hist:
+                    track_hist[tid] = deque(maxlen=HIST_LEN)
+                last_seen[tid] = frame_idx
+                tracks[tid] = {"bbox": box, "hist": track_hist[tid]}
 
-        removed = tracker.remove_stale(frame_idx)
-        for tid in removed:
-            if tid in person_energy_state:
-                del person_energy_state[tid]
-
-        tracks = tracker.get_tracks()
+        # drop history for ids ByteTrack hasn't returned in a while
+        for tid in [t for t, f in list(last_seen.items()) if frame_idx - f > MAX_MISSES]:
+            track_hist.pop(tid, None)
+            last_seen.pop(tid, None)
+            person_energy_state.pop(tid, None)
 
         people_count = len(tracks)
+
+        # debug: count id churn (1 person walking should stay ~1 unique id)
+        seen_ids.update(tracks.keys())
+        if frame_idx % 30 == 0:
+            print(f"fps {fps:.1f}  people {people_count}  unique ids {len(seen_ids)}")
 
         # Add to history and check if count is stable
         people_count_history.append(people_count)
